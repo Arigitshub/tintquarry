@@ -1,0 +1,5 @@
+node_modules/
+*.tq
+coverage/
+Thumbs.db
+.DS_Store

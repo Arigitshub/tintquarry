@@ -1,0 +1,5 @@
+# Sample image
+
+`salt-and-sky.jpg` is an original generated sample supplied for use and redistribution with this project. It was produced with the built-in OpenAI image generation tool, then encoded as JPEG. The image depicts an imagined sunset at the Salar de Uyuni.
+
+> Photorealistic natural wide landscape photograph, 3:2 horizontal. At dusk on the Salar de Uyuni in Bolivia, a thin layer of still water mirrors a broad sunset sky, jagged distant Andean mountains and rolling apricot clouds. Low horizon at 47% from top, sky pastel apricot and soft purple with small dark streaks, distant ridge a blackened plum silhouette, foreground shallow water with extremely subtle salt ridges and reflection. A single small cluster of rough dark rocks in the lower right foreground gives the frame structure. Art-directed travel editorial with natural soft dusk colors, strong but realistic silver-blue and burnt orange tonal range, fine detail and uncluttered composition. Edge to edge image, no text, typography, people, borders, or logos.

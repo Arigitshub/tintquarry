@@ -1,0 +1,13 @@
+{
+  "name": "tintquarry",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first raster image editor with editable layers",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check model.js && node --check icons.js && node --check editor.js && node --check server.mjs"
+  }
+}

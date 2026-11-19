@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#edeae1">
+  <title>Tintquarry</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./studio.css">
+  <script type="module" src="./editor.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="Tintquarry home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>Tintquarry</a>
+    <div class="file-actions" aria-label="File actions">
+      <button id="new">New</button>
+      <button id="open">Open</button>
+      <button id="save">Save project</button>
+    </div>
+    <div class="top-right">
+      <div class="history" aria-label="History">
+        <button id="undo" data-icon="undo" aria-label="Undo" title="Undo (Ctrl/⌘ Z)" disabled></button>
+        <button id="redo" data-icon="redo" aria-label="Redo" title="Redo (Ctrl/⌘ Shift Z)" disabled></button>
+      </div>
+      <button class="primary" id="export"><span data-icon="download"></span>Export PNG</button>
+    </div>
+  </header>
+  <main class="studio">
+    <nav class="toolbox" aria-label="Canvas tools">
+      <button data-tool="move" data-icon="move" aria-label="Move" title="Move (V)" aria-pressed="true"></button>
+      <button data-tool="brush" data-icon="brush" aria-label="Brush" title="Brush (B)" aria-pressed="false"></button>
+      <button data-tool="eraser" data-icon="eraser" aria-label="Eraser" title="Eraser (E)" aria-pressed="false"></button>
+      <button data-tool="crop" data-icon="crop" aria-label="Crop" title="Crop (C)" aria-pressed="false"></button>
+      <button data-tool="hand" data-icon="hand" aria-label="Pan" title="Pan (H)" aria-pressed="false"></button>
+      <span class="toolbox-divider"></span>
+      <button id="help" data-icon="help" aria-label="Editor help" title="Editor help"></button>
+    </nav>
+    <section class="workbench" aria-label="Image workspace">
+      <div class="document-bar">
+        <div class="document-title"><span data-icon="picture" aria-hidden="true"></span><span id="document-name">Salt and Sky</span><span id="dirty" class="dirty" title="Unsaved edits" hidden></span></div>
+        <div class="view-actions">
+          <button id="compare" aria-pressed="false" title="Preview with layer adjustments bypassed"><span data-icon="compare"></span><span>Before</span></button>
+        </div>
+      </div>
+      <div class="stage" id="stage" data-tool="move">
+        <div class="artboard" id="artboard">
+          <canvas id="canvas" aria-label="Editable image canvas"></canvas>
+          <div id="crop-rect" class="crop-rect" hidden></div>
+        </div>
+        <div id="tool-options" class="tool-options" hidden>
+          <div id="brush-options" hidden>
+            <label for="paint-color">Color</label><input type="color" id="paint-color" value="#ffe058">
+            <label for="paint-size">Size</label><input type="range" min="1" max="150" id="paint-size" value="24"><output id="paint-size-value" for="paint-size">24 px</output>
+          </div>
+          <div id="crop-options" hidden><span id="crop-size">Drag to define a crop</span><button id="crop-cancel">Cancel</button><button class="primary" id="crop-apply" disabled>Apply crop</button></div>
+        </div>
+        <div class="drop-hint" id="drop-hint" hidden>Drop to open a project or add images</div>
+      </div>
+      <footer class="statusbar">
+        <div><span class="dimensions" id="dimensions">—</span><span class="status-message" id="status" role="status"></span></div>
+        <div class="zoom" aria-label="Canvas zoom">
+          <button id="zoom-out" data-icon="minus" aria-label="Zoom out"></button>
+          <button id="zoom-value" aria-label="Zoom to 100%" title="Actual size">—</button>
+          <button id="zoom-in" data-icon="plus" aria-label="Zoom in"></button>
+          <button id="fit" title="Fit canvas" aria-label="Fit canvas">Fit</button>
+        </div>
+      </footer>
+    </section>
+    <aside class="sidebar" aria-label="Editing panels">
+      <section class="inspector" aria-label="Layer inspector">
+        <div class="panel-head"><h1>Inspector</h1><button id="reset" class="quiet" title="Reset adjustments on the selected layer">Reset color</button></div>
+        <div class="histogram-box"><canvas id="histogram" width="288" height="76" aria-label="Red, green and blue histogram of visible pixels"></canvas><span>RGB</span></div>
+        <div class="tone">
+          <h2>Color adjustments</h2>
+          <div id="adjustments"></div>
+        </div>
+        <details class="transform">
+          <summary>Transform</summary>
+          <div class="transform-grid">
+            <label>X <input id="offset-x" type="number" step="1"></label>
+            <label>Y <input id="offset-y" type="number" step="1"></label>
+            <label>Scale % <input id="scale" type="number" min="5" max="800" step="1"></label>
+            <label>Rotate ° <input id="rotation" type="number" min="-360" max="360" step="1"></label>
+          </div>
+          <div class="flip"><button id="flip-x" aria-pressed="false">Flip H</button><button id="flip-y" aria-pressed="false">Flip V</button></div>
+        </details>
+      </section>
+      <section class="layers" aria-labelledby="layers-heading">
+        <div class="panel-head">
+          <h2 id="layers-heading">Layers <span id="layer-count"></span></h2>
+          <details class="add-menu" id="add-menu">
+            <summary title="Add layer" aria-label="Add layer" data-icon="plus"></summary>
+            <div class="popup">
+              <button id="import">Import images…</button>
+              <button id="add-paint">Add paint layer</button>
+              <button id="add-fill">Add color fill…</button>
+            </div>
+          </details>
+        </div>
+        <div class="layer-mix">
+          <label>Blend mode<select id="blend"></select></label>
+          <label for="opacity">Opacity <output id="opacity-value" for="opacity">100%</output><input id="opacity" type="range" min="0" max="100" value="100"></label>
+        </div>
+        <ul id="layer-list" aria-label="Layers from front to back"></ul>
+        <div class="layer-actions" aria-label="Selected layer actions">
+          <button id="layer-up" data-icon="up" aria-label="Raise layer" title="Raise layer"></button>
+          <button id="layer-down" data-icon="down" aria-label="Lower layer" title="Lower layer"></button>
+          <button id="duplicate" data-icon="copy" aria-label="Duplicate layer" title="Duplicate layer"></button>
+          <button id="rename" data-icon="edit" aria-label="Rename layer" title="Rename layer"></button>
+          <button id="delete" data-icon="trash" aria-label="Delete layer" title="Delete layer"></button>
+        </div>
+      </section>
+    </aside>
+  </main>
+  <input type="file" id="open-file" accept=".tq,.png,.jpg,.jpeg,.webp,.avif,.gif,.bmp" hidden>
+  <input type="file" id="import-files" accept=".png,.jpg,.jpeg,.webp,.avif,.gif,.bmp" multiple hidden>
+  <dialog id="new-dialog">
+    <form id="new-form">
+      <h2>New image</h2>
+      <label>Title <input id="new-name" value="Untitled" maxlength="100" required></label>
+      <div class="form-row"><label>Width (px)<input id="new-width" type="number" min="1" max="4096" value="1200" required></label><label>Height (px)<input id="new-height" type="number" min="1" max="4096" value="800" required></label></div>
+      <div class="dialog-actions"><button type="button" data-close="new-dialog">Cancel</button><button type="submit" class="primary">Create canvas</button></div>
+    </form>
+  </dialog>
+  <dialog id="fill-dialog">
+    <form id="fill-form">
+      <h2>Add color fill</h2>
+      <label>Fill color <input id="fill-color" type="color" value="#db8b55"></label>
+      <div class="dialog-actions"><button type="button" data-close="fill-dialog">Cancel</button><button type="submit" class="primary">Add layer</button></div>
+    </form>
+  </dialog>
+  <dialog id="rename-dialog">
+    <form id="rename-form">
+      <h2>Rename layer</h2>
+      <label>Name <input id="layer-name-input" maxlength="100" required></label>
+      <div class="dialog-actions"><button type="button" data-close="rename-dialog">Cancel</button><button type="submit" class="primary">Rename</button></div>
+    </form>
+  </dialog>
+  <dialog id="help-dialog">
+    <h2>Working in Tintquarry</h2>
+    <p>Open an image to start a project. Import more images from the Layers panel or drop them into the canvas.</p>
+    <p>Drag the selected layer with Move. Brush adds a paint layer when needed. Eraser works on paint layers. Use Fit to reset the view.</p>
+    <p>Save a <code>.tq</code> project to keep layers editable. Export PNG to share the visible composite.</p>
+    <div class="dialog-actions"><button id="load-sample">Open sample</button><button class="primary" data-close="help-dialog">Done</button></div>
+  </dialog>
+</body>
+</html>
