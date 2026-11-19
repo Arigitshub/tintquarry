@@ -1,6 +1,6 @@
 import {
   MAX_LIVE_PIXELS, MAX_HISTORY_PIXELS, adjustments, modes, newId, clamp, blankAdjustments,
-  activeLayer, makeDocument, makeLayer, insertLayer, imageCanvas, layerMatrix, drawComposite,
+  activeLayer, makeDocument, makeLayer, insertLayer, imageCanvas, layerMatrix, selectionMask, drawComposite,
   readRaster, canvasAsset, usedAssetIDs, assetPixels, saveProject, openProject,
 } from './model.js';
 import { setIcon } from './icons.js';
@@ -25,6 +25,9 @@ let pan = { x: 0, y: 0 };
 let actualZoom = 1;
 let gesture = null;
 let crop = null;
+let selection = null;
+let maskBrush = 'hide';
+let maskTarget = null;
 let pending = null;
 let paintPreview = null;
 let frame = 0;
@@ -90,11 +93,13 @@ function edit(callback) {
   try {
     callback(doc);
     commit(before);
+    return true;
   } catch (error) {
     doc = before;
     reclaim();
     refresh();
     report(error);
+    return false;
   }
 }
 
@@ -107,6 +112,7 @@ function travel(from, to) {
   if (next.width !== doc.width || next.height !== doc.height) resetView();
   doc = next;
   crop = null;
+  selection = null;
   refresh();
 }
 
@@ -234,6 +240,24 @@ function refreshInspector() {
   showOpacity(layer?.opacity ?? 100);
   $('compare').setAttribute('aria-pressed', bypass);
   $('compare').lastElementChild.textContent = bypass ? 'Show edits' : 'Before';
+  refreshMaskControls(layer);
+}
+
+function refreshMaskControls(layer) {
+  const mask = layer?.mask;
+  if (tool === 'mask' && !(layer?.visible && mask?.enabled && layer.id === maskTarget)) setTool('move');
+  $('mask-panel').hidden = !layer;
+  $('mask-state').textContent = !mask ? 'No mask' : [
+    mask.enabled ? 'Enabled' : 'Disabled',
+    mask.inverted ? 'Inverted' : null,
+  ].filter(Boolean).join(' · ');
+  $('mask-add').hidden = Boolean(mask);
+  for (const id of ['mask-edit', 'mask-toggle', 'mask-invert', 'mask-remove']) $(id).hidden = !mask;
+  $('mask-edit').disabled = !(layer?.visible && mask?.enabled);
+  $('mask-edit').setAttribute('aria-pressed', tool === 'mask');
+  $('mask-toggle').textContent = mask?.enabled ? 'Disable' : 'Enable';
+  $('mask-invert').setAttribute('aria-pressed', Boolean(mask?.inverted));
+  updateSelection();
 }
 
 function refreshLayers() {
@@ -262,15 +286,16 @@ function refreshLayers() {
       thumb.append(image);
     }
     const name = Object.assign(document.createElement('strong'), { textContent: layer.name });
-    const type = Object.assign(document.createElement('small'), {
-      textContent: { photo: 'Image', paint: 'Paint', fill: 'Color fill' }[layer.type],
-    });
+    const kind = { photo: 'Image', paint: 'Paint', fill: 'Color fill' }[layer.type];
+    const maskLabel = layer.mask ? (layer.mask.enabled ? ' · Mask' : ' · Mask off') : '';
+    const type = Object.assign(document.createElement('small'), { textContent: kind + maskLabel });
     const label = Object.assign(document.createElement('span'), { className: 'layer-label' });
     label.append(name, type);
     pick.append(thumb, label);
     pick.addEventListener('click', () => {
       finishSlider();
       cancelGesture();
+      if (tool === 'mask' && doc.selected !== layer.id) setTool('move');
       doc.selected = layer.id;
       refreshInspector();
       refreshLayers();
@@ -355,6 +380,7 @@ function updateView() {
   artboard.style.top = `calc(50% + ${pan.y}px)`;
   $('zoom-value').textContent = `${Math.max(1, Math.round(actualZoom * 100))}%`;
   updateCrop();
+  updateSelection();
 }
 
 function stepZoom(factor) {
@@ -365,17 +391,23 @@ function stepZoom(factor) {
 function setTool(next) {
   cancelGesture();
   tool = next;
+  maskTarget = tool === 'mask' ? doc.selected : null;
   crop = null;
+  selection = null;
   stage.dataset.tool = tool;
   for (const button of document.querySelectorAll('[data-tool]:is(button)')) {
     button.setAttribute('aria-pressed', button.dataset.tool === tool);
   }
   const isPaint = tool === 'brush' || tool === 'eraser';
-  $('tool-options').hidden = !isPaint && tool !== 'crop';
+  $('tool-options').hidden = !isPaint && !['crop', 'select', 'mask'].includes(tool);
   $('brush-options').hidden = !isPaint;
   $('paint-color').disabled = tool === 'eraser';
   $('crop-options').hidden = tool !== 'crop';
+  $('selection-options').hidden = tool !== 'select';
+  $('mask-brush-options').hidden = tool !== 'mask';
+  $('mask-edit').setAttribute('aria-pressed', tool === 'mask');
   updateCrop();
+  updateSelection();
 }
 
 function pointOnCanvas(event, bounded = false) {
@@ -385,17 +417,66 @@ function pointOnCanvas(event, bounded = false) {
   return bounded ? { x: clamp(x, 0, doc.width), y: clamp(y, 0, doc.height) } : { x, y };
 }
 
-function updateCrop() {
-  const rect = $('crop-rect');
-  const display = crop && crop.width > 0 && crop.height > 0;
+function updateOutline(rect, bounds) {
+  const display = Boolean(bounds?.width && bounds.height);
   rect.hidden = !display;
-  $('crop-apply').disabled = !display;
-  $('crop-size').textContent = display ? `${crop.width} × ${crop.height} px` : 'Drag to define a crop';
   if (display) {
-    for (const [prop, value] of Object.entries({ left: crop.x, top: crop.y, width: crop.width, height: crop.height })) {
+    const { x, y, width, height } = bounds;
+    for (const [prop, value] of Object.entries({ left: x, top: y, width, height })) {
       rect.style[prop] = `${value * actualZoom}px`;
     }
   }
+  return display;
+}
+
+function updateCrop() {
+  const display = updateOutline($('crop-rect'), crop);
+  $('crop-apply').disabled = !display;
+  $('crop-size').textContent = display ? `${crop.width} × ${crop.height} px` : 'Drag to define a crop';
+}
+
+function updateSelection() {
+  const outline = $('selection-outline');
+  outline.dataset.shape = $('selection-shape').value;
+  const display = updateOutline(outline, selection);
+  const layer = activeLayer(doc);
+  $('selection-clear').disabled = !display;
+  $('selection-mask').disabled = !display || !layer;
+  $('selection-mask').textContent = layer?.mask ? 'Replace mask' : 'Mask selection';
+}
+
+function rectangleBetween(start, end) {
+  const left = Math.round(Math.min(start.x, end.x));
+  const top = Math.round(Math.min(start.y, end.y));
+  return {
+    x: left, y: top, width: Math.round(Math.max(start.x, end.x)) - left,
+    height: Math.round(Math.max(start.y, end.y)) - top,
+  };
+}
+
+function maskSelection() {
+  const layer = activeLayer(doc);
+  if (!selection?.width || !selection.height || !layer || gesture) return;
+  const bounds = { ...selection, shape: $('selection-shape').value };
+  if (edit(() => {
+    const asset = newId();
+    assets.set(asset, canvasAsset(selectionMask(layer, bounds)));
+    layer.mask = { asset, enabled: true, inverted: false };
+  })) {
+    setTool('move');
+    message('Selection applied as a layer mask');
+  }
+}
+
+function editMask(callback) {
+  if (!activeLayer(doc)) return;
+  edit(() => callback(activeLayer(doc)));
+}
+
+function setMaskBrush(mode) {
+  maskBrush = mode;
+  $('mask-hide').setAttribute('aria-pressed', mode === 'hide');
+  $('mask-reveal').setAttribute('aria-pressed', mode === 'reveal');
 }
 
 function applyCrop() {
@@ -416,9 +497,9 @@ function applyCrop() {
 
 function paintStroke(point) {
   const local = gesture.inverse.transformPoint(point);
-  const brush = paintPreview.image.getContext('2d');
-  brush.globalCompositeOperation = tool === 'eraser' ? 'destination-out' : 'source-over';
-  brush.strokeStyle = brush.fillStyle = $('paint-color').value;
+  const brush = (paintPreview.mask ?? paintPreview.image).getContext('2d');
+  brush.globalCompositeOperation = gesture.remove ? 'destination-out' : 'source-over';
+  brush.strokeStyle = brush.fillStyle = paintPreview.mask ? '#000' : $('paint-color').value;
   brush.lineWidth = gesture.size;
   brush.lineCap = 'round';
   brush.beginPath();
@@ -453,6 +534,21 @@ function startPainting(layer, point) {
   paintPreview = { id: layer.id, image };
   gesture.inverse = layerMatrix(layer).inverse();
   gesture.size = $('paint-size').valueAsNumber / (layer.scale / 100);
+  gesture.remove = tool === 'eraser';
+  paintStroke(point);
+  return true;
+}
+
+function startMaskPainting(layer, point) {
+  if (!layer?.visible || !layer.mask?.enabled) return false;
+  const mask = imageCanvas(layer.width, layer.height);
+  const ctx = mask.getContext('2d');
+  if (layer.mask.asset) ctx.drawImage(assets.get(layer.mask.asset).image, 0, 0);
+  else ctx.fillRect(0, 0, layer.width, layer.height);
+  paintPreview = { id: layer.id, mask };
+  gesture.inverse = layerMatrix(layer).inverse();
+  gesture.size = $('mask-size').valueAsNumber / (layer.scale / 100);
+  gesture.remove = (maskBrush === 'hide') !== layer.mask.inverted;
   paintStroke(point);
   return true;
 }
@@ -461,6 +557,7 @@ function cancelGesture() {
   if (!gesture) return;
   if (gesture.before) doc = gesture.before;
   if (gesture.tool === 'crop') crop = gesture.previousCrop;
+  if (gesture.tool === 'select') selection = gesture.previousSelection;
   gesture = null;
   paintPreview = null;
   refresh();
@@ -472,14 +569,15 @@ stage.addEventListener('pointerdown', event => {
   const layer = activeLayer(doc);
   if (tool === 'move' && !layer?.visible) return;
   finishSlider();
-  const point = pointOnCanvas(event, tool === 'crop');
+  const point = pointOnCanvas(event, ['crop', 'select'].includes(tool));
   gesture = {
-    pointerId: event.pointerId, tool, point, previousCrop: crop, layerX: layer?.x, layerY: layer?.y,
+    pointerId: event.pointerId, tool, point, previousCrop: crop, previousSelection: selection, layerX: layer?.x, layerY: layer?.y,
     screenX: event.clientX, screenY: event.clientY, pan: { ...pan },
-    before: ['hand', 'crop'].includes(tool) ? null : structuredClone(doc),
+    before: ['hand', 'crop', 'select'].includes(tool) ? null : structuredClone(doc),
   };
   try {
-    if (['brush', 'eraser'].includes(tool) && !startPainting(layer, point)) {
+    const start = { brush: startPainting, eraser: startPainting, mask: startMaskPainting }[tool];
+    if (start && !start(layer, point)) {
       cancelGesture();
       return;
     }
@@ -492,13 +590,17 @@ stage.addEventListener('pointerdown', event => {
     crop = null;
     updateCrop();
   }
+  if (tool === 'select') {
+    selection = null;
+    updateSelection();
+  }
   stage.setPointerCapture(event.pointerId);
   event.preventDefault();
 });
 
 stage.addEventListener('pointermove', event => {
   if (gesture?.pointerId !== event.pointerId) return;
-  const point = pointOnCanvas(event, tool === 'crop');
+  const point = pointOnCanvas(event, ['crop', 'select'].includes(tool));
   const start = gesture.point;
   if (tool === 'move') {
     const layer = activeLayer(doc);
@@ -510,11 +612,11 @@ stage.addEventListener('pointermove', event => {
     pan.y = gesture.pan.y + event.clientY - gesture.screenY;
     updateView();
   } else if (tool === 'crop') {
-    crop = {
-      x: Math.round(Math.min(point.x, start.x)), y: Math.round(Math.min(point.y, start.y)),
-      width: Math.abs(Math.round(point.x) - Math.round(start.x)), height: Math.abs(Math.round(point.y) - Math.round(start.y)),
-    };
+    crop = rectangleBetween(start, point);
     updateCrop();
+  } else if (tool === 'select') {
+    selection = rectangleBetween(start, point);
+    updateSelection();
   } else {
     paintStroke(point);
   }
@@ -527,8 +629,10 @@ stage.addEventListener('pointerup', event => {
   try {
     if (paintPreview) {
       const id = newId();
-      assets.set(id, canvasAsset(paintPreview.image));
-      activeLayer(doc).asset = id;
+      const layer = activeLayer(doc);
+      assets.set(id, canvasAsset(paintPreview.mask ?? paintPreview.image));
+      if (paintPreview.mask) layer.mask.asset = id;
+      else layer.asset = id;
       paintPreview = null;
       commit(before);
     } else if (tool === 'move' && (layerX !== activeLayer(doc).x || layerY !== activeLayer(doc).y)) {
@@ -696,6 +800,16 @@ const actions = {
   'zoom-value': () => { zoom = 1; pan = { x: 0, y: 0 }; updateView(); },
   'crop-apply': applyCrop,
   'crop-cancel': () => setTool('move'),
+  'selection-clear': () => { selection = null; updateSelection(); },
+  'selection-mask': maskSelection,
+  'mask-add': () => editMask(layer => { layer.mask = { asset: null, enabled: true, inverted: false }; }),
+  'mask-edit': () => setTool(tool === 'mask' ? 'move' : 'mask'),
+  'mask-toggle': () => editMask(layer => { layer.mask.enabled = !layer.mask.enabled; }),
+  'mask-invert': () => editMask(layer => { layer.mask.inverted = !layer.mask.inverted; }),
+  'mask-remove': () => editMask(layer => { delete layer.mask; }),
+  'mask-hide': () => setMaskBrush('hide'),
+  'mask-reveal': () => setMaskBrush('reveal'),
+  'mask-done': () => setTool('move'),
   help: () => $('help-dialog').showModal(),
   'load-sample': () => { $('help-dialog').close(); if (allowReplacement()) runAsync(loadSample); },
   compare: () => { bypass = !bypass; refreshInspector(); scheduleDraw(); },
@@ -731,6 +845,8 @@ document.addEventListener('click', event => {
 });
 $('blend').addEventListener('change', event => edit(() => { activeLayer(doc).blend = event.target.value; }));
 $('paint-size').addEventListener('input', event => { $('paint-size-value').value = `${event.target.value} px`; });
+$('mask-size').addEventListener('input', event => { $('mask-size-value').value = `${event.target.value} px`; });
+$('selection-shape').addEventListener('change', updateSelection);
 
 $('new-form').addEventListener('submit', event => {
   event.preventDefault();
@@ -788,7 +904,7 @@ stage.addEventListener('drop', event => {
   else importFiles(files);
 });
 
-const hotkeys = { v: 'move', b: 'brush', e: 'eraser', c: 'crop', h: 'hand' };
+const hotkeys = { v: 'move', b: 'brush', e: 'eraser', m: 'select', c: 'crop', h: 'hand' };
 window.addEventListener('keydown', event => {
   if (busy || document.querySelector('dialog[open]')) return;
   if (event.target.closest?.('input, select, textarea, [contenteditable]')) return;
@@ -805,7 +921,7 @@ window.addEventListener('keydown', event => {
   if (Object.hasOwn(hotkeys, key)) setTool(hotkeys[key]);
   if (key === 'escape') {
     if (gesture) cancelGesture();
-    else if (tool === 'crop') setTool('move');
+    else if (['crop', 'select', 'mask'].includes(tool)) setTool('move');
   }
   if (key === 'enter' && tool === 'crop' && !event.target.closest?.('button, summary')) applyCrop();
   if (key === '+' || key === '=') actions['zoom-in']();

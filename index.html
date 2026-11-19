@@ -30,6 +30,7 @@
       <button data-tool="move" data-icon="move" aria-label="Move" title="Move (V)" aria-pressed="true"></button>
       <button data-tool="brush" data-icon="brush" aria-label="Brush" title="Brush (B)" aria-pressed="false"></button>
       <button data-tool="eraser" data-icon="eraser" aria-label="Eraser" title="Eraser (E)" aria-pressed="false"></button>
+      <button data-tool="select" data-icon="select" aria-label="Select area" title="Select area (M)" aria-pressed="false"></button>
       <button data-tool="crop" data-icon="crop" aria-label="Crop" title="Crop (C)" aria-pressed="false"></button>
       <button data-tool="hand" data-icon="hand" aria-label="Pan" title="Pan (H)" aria-pressed="false"></button>
       <span class="toolbox-divider"></span>
@@ -46,6 +47,7 @@
         <div class="artboard" id="artboard">
           <canvas id="canvas" aria-label="Editable image canvas"></canvas>
           <div id="crop-rect" class="crop-rect" hidden></div>
+          <div id="selection-outline" class="selection-outline" aria-hidden="true" hidden></div>
         </div>
         <div id="tool-options" class="tool-options" hidden>
           <div id="brush-options" hidden>
@@ -53,6 +55,19 @@
             <label for="paint-size">Size</label><input type="range" min="1" max="150" id="paint-size" value="24"><output id="paint-size-value" for="paint-size">24 px</output>
           </div>
           <div id="crop-options" hidden><span id="crop-size">Drag to define a crop</span><button id="crop-cancel">Cancel</button><button class="primary" id="crop-apply" disabled>Apply crop</button></div>
+          <div id="selection-options" hidden>
+            <select id="selection-shape" aria-label="Selection shape"><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option></select>
+            <button id="selection-clear" disabled>Clear</button>
+            <button class="primary" id="selection-mask" disabled>Mask selection</button>
+          </div>
+          <div id="mask-brush-options" hidden>
+            <div class="brush-modes" aria-label="Mask brush mode">
+              <button id="mask-hide" aria-pressed="true">Hide</button>
+              <button id="mask-reveal" aria-pressed="false">Reveal</button>
+            </div>
+            <label for="mask-size">Size</label><input type="range" min="1" max="150" id="mask-size" value="24"><output id="mask-size-value" for="mask-size">24 px</output>
+            <button id="mask-done">Done</button>
+          </div>
         </div>
         <div class="drop-hint" id="drop-hint" hidden>Drop to open a project or add images</div>
       </div>
@@ -109,6 +124,16 @@
           <button id="rename" data-icon="edit" aria-label="Rename layer" title="Rename layer"></button>
           <button id="delete" data-icon="trash" aria-label="Delete layer" title="Delete layer"></button>
         </div>
+        <section class="mask-panel" id="mask-panel" aria-labelledby="mask-heading" hidden>
+          <div class="mask-heading"><h3 id="mask-heading">Layer mask</h3><span id="mask-state" role="status">No mask</span></div>
+          <div class="mask-actions">
+            <button id="mask-add">Add mask</button>
+            <button id="mask-edit" aria-pressed="false" hidden>Paint mask</button>
+            <button id="mask-toggle" hidden>Disable</button>
+            <button id="mask-invert" aria-pressed="false" hidden>Invert</button>
+            <button id="mask-remove" hidden>Remove</button>
+          </div>
+        </section>
       </section>
     </aside>
   </main>
@@ -140,6 +165,7 @@
     <h2>Working in Tintquarry</h2>
     <p>Open an image to start a project. Import more images from the Layers panel or drop them into the canvas.</p>
     <p>Drag the selected layer with Move. Brush adds a paint layer when needed. Eraser works on paint layers. Use Fit to reset the view.</p>
+    <p>Choose Select area to turn a rectangle or ellipse into a layer mask. Use Paint mask to hide or reveal parts of that layer.</p>
     <p>Save a <code>.tq</code> project to keep layers editable. Export PNG to share the visible composite.</p>
     <div class="dialog-actions"><button id="load-sample">Open sample</button><button class="primary" data-close="help-dialog">Done</button></div>
   </dialog>

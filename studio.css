@@ -90,7 +90,8 @@ button[data-icon], [data-icon] { display: inline-flex; align-items: center; just
   touch-action: none;
 }
 .stage[data-tool="move"] .artboard { cursor: move; }
-.stage[data-tool="brush"] .artboard, .stage[data-tool="eraser"] .artboard, .stage[data-tool="crop"] .artboard { cursor: crosshair; }
+.stage[data-tool="brush"] .artboard, .stage[data-tool="eraser"] .artboard, .stage[data-tool="crop"] .artboard,
+.stage[data-tool="select"] .artboard, .stage[data-tool="mask"] .artboard { cursor: crosshair; }
 .stage[data-tool="hand"] { cursor: grab; }
 .stage[data-tool="hand"]:active { cursor: grabbing; }
 .artboard {
@@ -111,6 +112,13 @@ button[data-icon], [data-icon] { display: inline-flex; align-items: center; just
   pointer-events: none;
   background: linear-gradient(to right, transparent 33%, #fff6 33% 33.3%, transparent 33.3% 66%, #fff6 66% 66.3%, transparent 66.3%), linear-gradient(to bottom, transparent 33%, #fff6 33% 33.3%, transparent 33.3% 66%, #fff6 66% 66.3%, transparent 66.3%);
 }
+.selection-outline {
+  position: absolute;
+  border: 1px dashed #fff5c1;
+  box-shadow: 0 0 0 1px #222b, inset 0 0 0 1px #2226;
+  pointer-events: none;
+}
+.selection-outline[data-shape="ellipse"] { border-radius: 50%; }
 .drop-hint, .tool-options {
   position: absolute;
   left: 50%;
@@ -124,6 +132,9 @@ button[data-icon], [data-icon] { display: inline-flex; align-items: center; just
 .tool-options { bottom: 15px; }
 .tool-options > div { display: flex; align-items: center; gap: 10px; font-size: 12px; white-space: nowrap; }
 .tool-options input[type="range"] { width: 95px; }
+.brush-modes { display: flex; gap: 2px; padding: 2px; background: #e8e4d8; border-radius: 6px; }
+.brush-modes button { padding: 3px 6px; }
+.brush-modes button[aria-pressed="true"] { background: #f9e287; border-color: #dfc564; }
 .statusbar { border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 .statusbar > div:first-child { display: flex; gap: 12px; overflow: hidden; white-space: nowrap; }
 .status-message { overflow: hidden; text-overflow: ellipsis; }
@@ -186,6 +197,13 @@ input[type="color"] { width: 33px; height: 25px; cursor: pointer; padding: 2px !
 .layer-actions { display: flex; gap: 4px; padding-top: 7px; }
 .layer-actions button { padding: 5px 8px; }
 .layer-actions svg { width: 15px; height: 15px; }
+.mask-panel { border-top: 1px solid var(--line); margin-top: 10px; padding: 10px 0 6px; }
+.mask-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.mask-heading h3 { margin: 0; font-size: 12px; }
+#mask-state { color: var(--muted); font-size: 11px; }
+.mask-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+.mask-actions button { border-color: var(--line); font-size: 11px; padding: 4px 6px; }
+.mask-actions button[aria-pressed="true"] { background: #fae8a0; border-color: #d9c780; }
 .empty-layers { color: var(--muted); font-size: 12px; padding: 8px 0; }
 dialog { width: min(380px, calc(100% - 32px)); border: 1px solid var(--line); border-radius: 12px; padding: 22px; background: var(--panel); color: var(--ink); box-shadow: 0 20px 65px #0004; }
 dialog::backdrop { background: #1416109e; }

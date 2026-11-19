@@ -29,6 +29,7 @@ const mimeFromExtension = {
 };
 const allowedURL = /^data:image\/(png|jpeg|webp|avif|gif|bmp);base64,[A-Za-z0-9+/]+={0,2}$/;
 const hexColor = /^#[0-9a-f]{6}$/i;
+const compositeBuffers = new WeakMap();
 
 export const newId = () => crypto.randomUUID();
 export const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -71,15 +72,60 @@ export function layerMatrix(layer) {
     .translate(-width / 2, -height / 2);
 }
 
+export function selectionMask(layer, selection) {
+  const mask = imageCanvas(layer.width, layer.height);
+  const ctx = mask.getContext('2d');
+  ctx.setTransform(layerMatrix(layer).inverse());
+  const { x, y, width, height, shape } = selection;
+  if (shape === 'ellipse') {
+    ctx.beginPath();
+    ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.fillRect(x, y, width, height);
+  }
+  return mask;
+}
+
 export function drawComposite(canvas, doc, assets, { bypass = false, livePaint } = {}) {
   if (canvas.width !== doc.width) canvas.width = doc.width;
   if (canvas.height !== doc.height) canvas.height = doc.height;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.imageSmoothingQuality = 'high';
+  let scratch;
 
   for (const layer of doc.layers) {
     if (!layer.visible || layer.opacity === 0) continue;
+    const preview = livePaint?.id === layer.id ? livePaint : null;
+    const mask = layer.mask?.enabled ? layer.mask : null;
+    const maskImage = preview?.mask ?? assets.get(mask?.asset)?.image;
+    if (mask?.inverted && !maskImage) continue;
+
+    let image = preview?.image ?? assets.get(layer.asset)?.image;
+    if (mask && maskImage) {
+      // Isolate coverage from the document so the mask cannot clear the layers below.
+      scratch ??= compositeBuffers.get(canvas);
+      if (!scratch) {
+        scratch = imageCanvas(layer.width, layer.height);
+        compositeBuffers.set(canvas, scratch);
+      }
+      if (scratch.width !== layer.width) scratch.width = layer.width;
+      if (scratch.height !== layer.height) scratch.height = layer.height;
+      const buffer = scratch.getContext('2d');
+      buffer.globalCompositeOperation = 'source-over';
+      buffer.clearRect(0, 0, layer.width, layer.height);
+      if (layer.type === 'fill') {
+        buffer.fillStyle = layer.color;
+        buffer.fillRect(0, 0, layer.width, layer.height);
+      } else if (image) {
+        buffer.drawImage(image, 0, 0);
+      }
+      buffer.globalCompositeOperation = mask.inverted ? 'destination-out' : 'destination-in';
+      buffer.drawImage(maskImage, 0, 0);
+      image = scratch;
+    }
+
     ctx.save();
     ctx.globalAlpha = layer.opacity / 100;
     ctx.globalCompositeOperation = layer.blend;
@@ -88,15 +134,15 @@ export function drawComposite(canvas, doc, assets, { bypass = false, livePaint }
       ctx.filter = `brightness(${1 + brightness / 100}) contrast(${1 + contrast / 100}) saturate(${1 + saturation / 100}) hue-rotate(${hue}deg)`;
     }
     ctx.setTransform(layerMatrix(layer));
-    if (layer.type === 'fill') {
+    if (image) {
+      ctx.drawImage(image, 0, 0, layer.width, layer.height);
+    } else if (layer.type === 'fill') {
       ctx.fillStyle = layer.color;
       ctx.fillRect(0, 0, layer.width, layer.height);
-    } else {
-      const image = livePaint?.id === layer.id ? livePaint.image : assets.get(layer.asset)?.image;
-      if (image) ctx.drawImage(image, 0, 0, layer.width, layer.height);
     }
     ctx.restore();
   }
+  if (!scratch) compositeBuffers.delete(canvas);
 }
 
 export function fileDataURL(file) {
@@ -144,7 +190,9 @@ export function canvasAsset(canvas) {
 }
 
 export function usedAssetIDs(documents) {
-  return new Set(documents.flatMap(doc => doc.layers.map(layer => layer.asset).filter(Boolean)));
+  return new Set(documents.flatMap(doc => doc.layers.flatMap(layer =>
+    [layer.asset, layer.mask?.asset].filter(Boolean),
+  )));
 }
 
 export function assetPixels(ids, assets) {
@@ -165,7 +213,8 @@ export function saveProject(doc, assets) {
     if (size > MAX_PROJECT_BYTES) throw new Error('The editable project exceeds 64 MiB.');
     images[id] = url;
   }
-  const blob = new Blob([JSON.stringify({ format: 'tintquarry', version: 1, document: doc, images })], {
+  const version = doc.layers.some(layer => layer.mask) ? 2 : 1;
+  const blob = new Blob([JSON.stringify({ format: 'tintquarry', version, document: doc, images })], {
     type: 'application/json',
   });
   if (blob.size > MAX_PROJECT_BYTES) throw new Error('The editable project exceeds 64 MiB.');
@@ -184,7 +233,7 @@ function inRange(value, min, max) {
   return Number.isFinite(value) && value >= min && value <= max;
 }
 
-function readLayer(layer) {
+function readLayer(layer, version) {
   if (!layer || !validId(layer.id) || !validName(layer.name)) throw new Error('Invalid layer metadata.');
   validateDimensions(layer.width, layer.height);
   const { id, type, name, width, height, visible, opacity, blend, x, y, scale, rotation, flipX, flipY } = layer;
@@ -207,6 +256,14 @@ function readLayer(layer) {
     if (!validId(layer.asset)) throw new Error('Invalid raster asset reference.');
     result.asset = layer.asset;
   }
+  if (layer.mask != null) {
+    const { asset, enabled, inverted } = layer.mask;
+    if (version !== 2 || typeof enabled !== 'boolean' || typeof inverted !== 'boolean' ||
+        (asset !== null && !validId(asset))) {
+      throw new Error('Invalid layer mask.');
+    }
+    result.mask = { asset, enabled, inverted };
+  }
   return result;
 }
 
@@ -219,13 +276,13 @@ export async function openProject(file) {
     throw new Error('Could not read the project as JSON.');
   }
   const source = data?.document;
-  if (data?.format !== 'tintquarry' || data.version !== 1 || !source || !validName(source.title) ||
+  if (data?.format !== 'tintquarry' || ![1, 2].includes(data.version) || !source || !validName(source.title) ||
       !Array.isArray(source.layers) || source.layers.length > MAX_LAYERS || !data.images || typeof data.images !== 'object') {
     throw new Error('This is not a supported Tintquarry project.');
   }
   const { title, width, height } = source;
   validateDimensions(width, height);
-  const layers = source.layers.map(readLayer);
+  const layers = source.layers.map(layer => readLayer(layer, data.version));
   const ids = new Set(layers.map(layer => layer.id));
   if (ids.size !== layers.length) throw new Error('The project contains duplicate layer IDs.');
   const doc = { title, width, height, layers, selected: ids.has(source.selected) ? source.selected : layers.at(-1)?.id ?? null };
@@ -239,9 +296,11 @@ export async function openProject(file) {
       if (total > MAX_LIVE_PIXELS) throw new Error('The project exceeds the raster memory limit.');
     }
     for (const layer of layers) {
-      if (!layer.asset) continue;
-      const asset = assets.get(layer.asset);
-      if (asset.width !== layer.width || asset.height !== layer.height) throw new Error('A layer has mismatched raster dimensions.');
+      for (const id of [layer.asset, layer.mask?.asset]) {
+        if (!id) continue;
+        const asset = assets.get(id);
+        if (asset.width !== layer.width || asset.height !== layer.height) throw new Error('A layer or mask has mismatched raster dimensions.');
+      }
     }
   } catch (error) {
     assets.forEach(asset => asset.image.close());
